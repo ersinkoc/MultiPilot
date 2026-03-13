@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tauri::{AppHandle, Emitter};
 use serde::Serialize;
 use crate::types::{AgentInstance, AgentStatus, AgentProfile, SpawnConfig};
+use crate::acp_runner::AcpRunner;
 
 /// Event payload sent to frontend when agent produces output
 #[derive(Clone, Serialize)]
@@ -119,6 +120,7 @@ pub struct AgentManager {
     stdin_senders: HashMap<String, mpsc::Sender<String>>,
     instances: HashMap<String, AgentInstance>,
     app_handle: Option<AppHandle>,
+    acp_runner: Option<AcpRunner>,
 }
 
 impl AgentManager {
@@ -128,11 +130,16 @@ impl AgentManager {
             stdin_senders: HashMap::new(),
             instances: HashMap::new(),
             app_handle: None,
+            acp_runner: None,
         }
     }
 
     pub fn set_app_handle(&mut self, handle: AppHandle) {
         self.app_handle = Some(handle);
+    }
+
+    pub fn set_acp_runner(&mut self, runner: AcpRunner) {
+        self.acp_runner = Some(runner);
     }
 
     /// Emit an output line to the frontend immediately
@@ -165,15 +172,136 @@ impl AgentManager {
         let is_gemini = is_gemini_command(&profile.acp_command) || is_gemini_command(&resolved_command);
         let is_aider = is_aider_command(&profile.acp_command) || is_aider_command(&resolved_command);
         let is_goose = is_goose_command(&profile.acp_command) || is_goose_command(&resolved_command);
-        let is_augment = is_augment_command(&profile.acp_command) || is_augment_command(&resolved_command);
-        let _is_kiro = is_kiro_command(&profile.acp_command) || is_kiro_command(&resolved_command);
-        let _is_mistral = is_mistral_command(&profile.acp_command) || is_mistral_command(&resolved_command);
-        let _is_opencode = is_opencode_command(&profile.acp_command) || is_opencode_command(&resolved_command);
-        let _is_qwen = is_qwen_command(&profile.acp_command) || is_qwen_command(&resolved_command);
 
         // Emit debug info to frontend
-        self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] Spawning: {}", &resolved_command));
+        self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] Spawning via ACP: {}", &resolved_command));
 
+        // Build agent args
+        let mut agent_args: Vec<String> = Vec::new();
+
+        // Add mode arguments if a mode is selected
+        if let Some(ref mode_id) = config.mode_id {
+            if let Some(mode) = profile.modes.iter().find(|m| m.id == *mode_id) {
+                for arg in &mode.args {
+                    agent_args.push(arg.clone());
+                }
+            }
+        }
+
+        // Add settings file if provided and profile supports it
+        let settings_file = config.settings_file.as_ref()
+            .or(profile.settings_file_path.as_ref());
+
+        if let Some(file_path) = settings_file {
+            if profile.supports_settings_file {
+                agent_args.push("--settings".to_string());
+                agent_args.push(file_path.clone());
+            }
+        }
+
+        // Add extra arguments from profile
+        for arg in &profile.extra_args {
+            agent_args.push(arg.clone());
+        }
+
+        // Add spawn-time extra arguments
+        if let Some(extra_args) = &config.extra_spawn_args {
+            for arg in extra_args {
+                agent_args.push(arg.clone());
+            }
+        }
+
+        // Add agent-specific non-interactive flags
+        if is_claude {
+            if !profile.extra_args.iter().any(|a| a == "-p" || a == "--print") {
+                agent_args.push("-p".to_string());
+            }
+            if !profile.extra_args.iter().any(|a| a == "--output-format") {
+                agent_args.push("--output-format".to_string());
+                agent_args.push("stream-json".to_string());
+            }
+            if !profile.extra_args.iter().any(|a| a == "--verbose") {
+                agent_args.push("--verbose".to_string());
+            }
+        }
+
+        if is_gemini {
+            if !profile.extra_args.iter().any(|a| a == "--output-format") {
+                agent_args.push("--output-format".to_string());
+                agent_args.push("stream-json".to_string());
+            }
+        }
+
+        // Add initial prompt if provided
+        if let Some(ref prompt) = config.initial_prompt {
+            if profile.supports_prompt_input {
+                let flag = profile.prompt_flag.as_deref().unwrap_or("");
+                if flag.is_empty() {
+                    agent_args.push(prompt.clone());
+                } else {
+                    agent_args.push(flag.to_string());
+                    agent_args.push(prompt.clone());
+                }
+            }
+        }
+
+        // Use ACP runner if available
+        if let Some(ref acp_runner) = self.acp_runner {
+            self.emit_output(&agent_id, "stderr", "[MultiPilot] Using ACP runner");
+
+            let pid = acp_runner.spawn_agent(
+                agent_id.clone(),
+                &resolved_command,
+                &agent_args,
+                &profile.env,
+                project_path,
+            ).await?;
+
+            self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] ACP runner started (PID: {})", pid));
+
+            let ts = now_millis();
+            let instance = AgentInstance {
+                id: agent_id.clone(),
+                profile_id: profile.id.clone(),
+                project_id: project_id.to_string(),
+                project_path: project_path.to_string(),
+                status: AgentStatus::Running,
+                session_id: Some(format!("session_{}", agent_id)),
+                spawned_at: ts,
+                updated_at: ts,
+                updates: Vec::new(),
+                pending_permission: None,
+                output: Vec::new(),
+                output_line_count: 0,
+                errors: Vec::new(),
+                spawn_config: Some(config),
+            };
+
+            // Create a dummy stdin channel (ACP runner handles stdin via WebSocket)
+            let (stdin_tx, _stdin_rx) = mpsc::channel::<String>(32);
+            self.stdin_senders.insert(agent_id.clone(), stdin_tx);
+            self.process_pids.insert(agent_id.clone(), pid);
+            self.instances.insert(agent_id, instance.clone());
+
+            return Ok(instance);
+        }
+
+        // Fallback to direct spawn if ACP runner not available
+        self.emit_output(&agent_id, "stderr", "[MultiPilot] ACP runner not available, using direct spawn");
+        self.spawn_direct(agent_id, profile, project_id, project_path, config, &resolved_command, &agent_args).await
+    }
+
+    /// Direct spawn fallback (legacy mode) - simplified to use pre-built args
+    async fn spawn_direct(
+        &mut self,
+        agent_id: String,
+        profile: &AgentProfile,
+        project_id: &str,
+        project_path: &str,
+        config: SpawnConfig,
+        resolved_command: &str,
+        agent_args: &[String],
+    ) -> Result<AgentInstance, String> {
         // Build the command - on Windows, use cmd.exe /C to properly resolve .cmd/.bat files
         let mut cmd = if cfg!(target_os = "windows") {
             let mut c = Command::new("cmd.exe");
@@ -184,7 +312,8 @@ impl AgentManager {
             Command::new(&resolved_command)
         };
 
-        cmd.args(&profile.acp_args)
+        // Add all pre-built args
+        cmd.args(agent_args)
             .current_dir(project_path)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -197,102 +326,6 @@ impl AgentManager {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-
-        // Add mode arguments if a mode is selected
-        if let Some(ref mode_id) = config.mode_id {
-            if let Some(mode) = profile.modes.iter().find(|m| m.id == *mode_id) {
-                for arg in &mode.args {
-                    cmd.arg(arg);
-                }
-            }
-        }
-
-        // Add settings file if provided and profile supports it
-        let settings_file = config.settings_file.as_ref()
-            .or(profile.settings_file_path.as_ref());
-
-        if let Some(file_path) = settings_file {
-            if profile.supports_settings_file {
-                cmd.arg("--settings").arg(file_path);
-            }
-        }
-
-        // Add extra arguments from profile (e.g., -q for Codex)
-        for arg in &profile.extra_args {
-            cmd.arg(arg);
-        }
-
-        // Add spawn-time extra arguments BEFORE prompt (model selection etc.)
-        if let Some(extra_args) = &config.extra_spawn_args {
-            for arg in extra_args {
-                cmd.arg(arg);
-            }
-        }
-
-        // Add output format flags for Claude Code (machine-readable streaming JSON)
-        // Claude requires -p/--print for non-interactive mode with --output-format
-        let has_output_format = profile.extra_args.iter().any(|a| a == "--output-format")
-            || config.extra_spawn_args.as_ref().map_or(false, |args| args.iter().any(|a| a == "--output-format"));
-
-        let has_print_flag = profile.extra_args.iter().any(|a| a == "-p" || a == "--print")
-            || config.extra_spawn_args.as_ref().map_or(false, |args| args.iter().any(|a| a == "-p" || a == "--print"));
-
-        // Agent-specific non-interactive mode configuration
-        if is_claude {
-            if !has_print_flag {
-                // -p is REQUIRED for non-interactive mode
-                cmd.arg("-p");
-            }
-            if !has_output_format {
-                cmd.arg("--output-format").arg("stream-json");
-            }
-        }
-
-        // Codex CLI - use 'exec' subcommand for non-interactive mode
-        if is_codex {
-            // For non-interactive mode, use 'exec' subcommand
-            cmd.arg("exec");
-        }
-
-        // Aider - runs in non-interactive mode automatically with --no-pretty
-        if is_aider {
-            // Aider outputs clean text by default, no special flags needed for non-interactive
-            // User can add --no-pretty to extra_args if needed
-        }
-
-        // Goose - use 'run' subcommand with -t for task mode
-        if is_goose {
-            // Goose needs 'run' subcommand and -t for task
-            cmd.arg("run").arg("-t");
-        }
-
-        // Augment Code - check if it has special requirements
-        if is_augment {
-            // Augment handles non-interactive mode differently, no automatic flags
-        }
-
-        // Gemini - will handle -p flag in prompt section below
-        // Kiro, Mistral, OpenCode, Qwen - rely on profile.extra_args for now
-
-        // Add initial prompt if provided
-        if let Some(ref prompt) = config.initial_prompt {
-            if profile.supports_prompt_input {
-                let flag = profile.prompt_flag.as_deref().unwrap_or("");
-
-                if is_gemini && !profile.extra_args.iter().any(|a| a == "-p" || a == "--prompt") {
-                    // Gemini needs -p flag for non-interactive
-                    cmd.arg("-p").arg(prompt);
-                } else if is_goose {
-                    // Goose takes prompt as positional after 'run -t'
-                    cmd.arg(prompt);
-                } else if flag.is_empty() {
-                    // Positional prompt (Codex exec takes prompt as positional)
-                    cmd.arg(prompt);
-                } else {
-                    cmd.arg(flag).arg(prompt);
-                }
-            }
         }
 
         // Set environment variables from profile
@@ -319,7 +352,12 @@ impl AgentManager {
         }
 
         // Log the full command for debugging
-        self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] is_claude={}, is_codex={}", is_claude, is_codex));
+        let full_cmd = format!("{:?}", cmd);
+        self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] Command: {}", full_cmd));
+        self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] Working dir: {}", project_path));
+
+        // Force unbuffered output for better real-time capture
+        cmd.env("PYTHONUNBUFFERED", "1");
 
         let mut child = cmd.spawn().map_err(|e| {
             let err_msg = format!("Failed to spawn '{}': {}. Make sure the command is installed and in PATH.", resolved_command, e);

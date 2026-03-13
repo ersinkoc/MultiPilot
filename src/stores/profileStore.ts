@@ -372,12 +372,12 @@ const defaultProfiles: AgentProfile[] = [
     provider: 'OpenAI',
     acpCommand: 'codex',
     acpArgs: [],
-    extraArgs: ['-q'],  // quiet mode for non-interactive
+    extraArgs: ['--dangerously-bypass-approvals-and-sandbox'],  // Skip trust prompts
     env: {},
     modes: CODEX_MODES,
     supportsSettingsFile: false,
     supportsPromptInput: true,
-    promptFlag: '',  // codex takes prompt as positional arg
+    promptFlag: '',  // Positional prompt
   },
   {
     id: 'gemini-cli',

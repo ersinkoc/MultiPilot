@@ -172,15 +172,46 @@ async fn start_sidecar_dev(app: tauri::AppHandle) -> Result<u32, String> {
             .ok_or_else(|| "Sidecar directory not found. Checked: ../sidecar, ./sidecar".to_string())?
     };
 
+    println!("[Sidecar] Found sidecar directory: {:?}", sidecar_dir);
+
     // Build the command to run tsx
     let tsx_bin = sidecar_dir.join("node_modules/.bin/tsx");
     let index_ts = sidecar_dir.join("src/index.ts");
 
+    // Convert to absolute paths for Windows cmd.exe compatibility
+    // Use canonicalize but strip the UNC prefix if present
+    let tsx_bin_abs = std::fs::canonicalize(&tsx_bin)
+        .map(|p| {
+            let s = p.to_string_lossy().to_string();
+            if s.starts_with("\\\\?\\") {
+                s[4..].to_string()
+            } else {
+                s
+            }
+        })
+        .unwrap_or_else(|_| tsx_bin.to_string_lossy().to_string());
+    let index_ts_abs = std::fs::canonicalize(&index_ts)
+        .map(|p| {
+            let s = p.to_string_lossy().to_string();
+            if s.starts_with("\\\\?\\") {
+                s[4..].to_string()
+            } else {
+                s
+            }
+        })
+        .unwrap_or_else(|_| index_ts.to_string_lossy().to_string());
+
+    println!("[Sidecar] tsx absolute: {}", tsx_bin_abs);
+    println!("[Sidecar] index.ts absolute: {}", index_ts_abs);
+
     let mut cmd = if cfg!(target_os = "windows") {
+        let tsx_cmd = std::path::PathBuf::from(&tsx_bin_abs).with_extension("cmd");
+        let tsx_cmd_str = tsx_cmd.to_string_lossy().to_string();
+        println!("[Sidecar] Windows - using cmd.exe /C with {}", tsx_cmd_str);
         let mut c = Command::new("cmd.exe");
         c.arg("/C");
-        c.arg(tsx_bin.with_extension("cmd").to_string_lossy().to_string());
-        c.arg(index_ts.to_string_lossy().to_string());
+        c.arg(&tsx_cmd_str);
+        c.arg(&index_ts_abs);
         c
     } else {
         let mut c = Command::new(tsx_bin.to_string_lossy().to_string());
@@ -206,10 +237,12 @@ async fn start_sidecar_dev(app: tauri::AppHandle) -> Result<u32, String> {
     }
 
     let child = cmd.spawn().map_err(|e| {
+        println!("[Sidecar] Failed to spawn: {}", e);
         format!("Failed to start sidecar: {}. Ensure Node.js deps are installed in sidecar/", e)
     })?;
 
     let pid = child.id().unwrap_or(0);
+    println!("[Sidecar] Spawned with PID: {}", pid);
     spawn_output_handlers(child, app).await?;
 
     Ok(pid)
@@ -301,6 +334,7 @@ async fn spawn_output_handlers(
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                println!("[Sidecar stdout] {}", line);
                 let _ = handle.emit("agent-output", crate::agent::AgentOutputEvent {
                     agent_id: "_sidecar".to_string(),
                     stream: "stdout".to_string(),
@@ -316,6 +350,7 @@ async fn spawn_output_handlers(
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                println!("[Sidecar stderr] {}", line);
                 let _ = handle.emit("agent-output", crate::agent::AgentOutputEvent {
                     agent_id: "_sidecar".to_string(),
                     stream: "stderr".to_string(),
@@ -327,8 +362,8 @@ async fn spawn_output_handlers(
 
     // Monitor process exit
     tokio::spawn(async move {
-        let _ = child.wait().await;
-        println!("[Sidecar] Process exited");
+        let status = child.wait().await;
+        println!("[Sidecar] Process exited with status: {:?}", status);
     });
 
     Ok(())

@@ -265,7 +265,7 @@ export function SpawnDialog() {
     const allArgs = [...selectedProfile.extraArgs, ...extraArgs, ...(selectedModelMode?.args || [])];
 
     if (isClaude && !allArgs.includes('--output-format')) {
-      parts.push('--output-format', 'stream-json', '--include-partial-messages', '--verbose');
+      parts.push('--output-format', 'stream-json', '--verbose');
     }
     if (isCodex && !allArgs.includes('--json')) {
       parts.push('--json');

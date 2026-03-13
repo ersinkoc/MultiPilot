@@ -9,12 +9,15 @@ mod agent;
 mod commands;
 mod discovery;
 mod types;
+mod acp_runner;
 
 use agent::AgentManager;
+use acp_runner::AcpRunner;
 
 #[derive(Default)]
 pub struct AppState {
     agent_manager: AgentManager,
+    acp_runner: Option<AcpRunner>,
 }
 
 fn main() {
@@ -29,9 +32,14 @@ fn main() {
             let state: tauri::State<Arc<Mutex<AppState>>> = app.state();
             let handle = app.handle().clone();
             let state_clone = state.inner().clone();
+
+            // Initialize ACP runner
+            let acp_runner = AcpRunner::new("ws://127.0.0.1:8765/ws".to_string());
+
             tauri::async_runtime::spawn(async move {
                 let mut state = state_clone.lock().await;
                 state.agent_manager.set_app_handle(handle);
+                state.agent_manager.set_acp_runner(acp_runner);
             });
             Ok(())
         })

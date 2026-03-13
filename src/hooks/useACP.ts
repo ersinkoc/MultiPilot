@@ -24,6 +24,7 @@ export function useACP() {
   const storesRef = useRef({
     addRequest: useApprovalStore.getState().addRequest,
     addAgentUpdate: useAgentStore.getState().addAgentUpdate,
+    addAgentOutput: useAgentStore.getState().addAgentOutput,
     updateAgentStatus: useAgentStore.getState().updateAgentStatus,
     addActivity: useActivityStore.getState().addActivity,
     createTask: useTaskStore.getState().createTask,
@@ -46,6 +47,7 @@ export function useACP() {
       useApprovalStore.subscribe((s) => { storesRef.current.addRequest = s.addRequest; }),
       useAgentStore.subscribe((s) => {
         storesRef.current.addAgentUpdate = s.addAgentUpdate;
+        storesRef.current.addAgentOutput = s.addAgentOutput;
         storesRef.current.updateAgentStatus = s.updateAgentStatus;
       }),
       useActivityStore.subscribe((s) => { storesRef.current.addActivity = s.addActivity; }),
@@ -240,12 +242,15 @@ export function useACP() {
 
       case 'acp_output': {
         const payload = message.payload as { content: string };
+        // Add to both updates (for the updates tab) and output (for the output tab)
         s.addAgentUpdate(message.agentId, {
           id: `update_${Date.now()}`,
           type: 'output',
           timestamp: Date.now(),
           content: payload.content,
         });
+        // Also add to raw output so it appears in the output tab
+        s.addAgentOutput(message.agentId, payload.content);
         break;
       }
 
