@@ -1,0 +1,100 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-start-dragging",
+    "shell:default",
+    "shell:allow-open",
+    "shell:allow-stdin-write",
+    "shell:allow-kill",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "npx",
+          "cmd": "npx",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "claude",
+          "cmd": "claude",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "codex",
+          "cmd": "codex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "gemini",
+          "cmd": "gemini",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "aider",
+          "cmd": "aider",
+          "args": true,
+          "sidecar": false
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "npx",
+          "cmd": "npx",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "claude",
+          "cmd": "claude",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "codex",
+          "cmd": "codex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "gemini",
+          "cmd": "gemini",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "aider",
+          "cmd": "aider",
+          "args": true,
+          "sidecar": false
+        }
+      ]
+    },
+    "fs:default",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-read-dir",
+    "fs:allow-remove",
+    "dialog:default",
+    "dialog:allow-open",
+    "store:default",
+    "store:allow-get",
+    "store:allow-set",
+    "store:allow-save",
+    "store:allow-load"
+  ]
+}
