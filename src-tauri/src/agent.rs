@@ -48,6 +48,71 @@ fn is_codex_command(cmd: &str) -> bool {
         || lower.ends_with("\\codex.exe") || lower.ends_with("\\codex.cmd")
 }
 
+/// Check if a command name refers to Gemini CLI (case-insensitive)
+fn is_gemini_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "gemini" || lower == "gemini.cmd" || lower == "gemini.exe"
+        || lower.ends_with("/gemini") || lower.ends_with("\\gemini")
+        || lower.ends_with("\\gemini.exe") || lower.ends_with("\\gemini.cmd")
+}
+
+/// Check if a command name refers to Aider (case-insensitive)
+fn is_aider_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "aider" || lower == "aider.cmd" || lower == "aider.exe"
+        || lower.ends_with("/aider") || lower.ends_with("\\aider")
+        || lower.ends_with("\\aider.exe") || lower.ends_with("\\aider.cmd")
+}
+
+/// Check if a command name refers to Goose (case-insensitive)
+fn is_goose_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "goose" || lower == "goose.cmd" || lower == "goose.exe"
+        || lower.ends_with("/goose") || lower.ends_with("\\goose")
+        || lower.ends_with("\\goose.exe") || lower.ends_with("\\goose.cmd")
+}
+
+/// Check if a command name refers to Augment Code (case-insensitive)
+fn is_augment_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "augment" || lower == "augment.cmd" || lower == "augment.exe"
+        || lower.ends_with("/augment") || lower.ends_with("\\augment")
+        || lower.ends_with("\\augment.exe") || lower.ends_with("\\augment.cmd")
+}
+
+/// Check if a command name refers to Kiro CLI (case-insensitive)
+fn is_kiro_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "kiro" || lower == "kiro.cmd" || lower == "kiro.exe"
+        || lower.ends_with("/kiro") || lower.ends_with("\\kiro")
+        || lower.ends_with("\\kiro.exe") || lower.ends_with("\\kiro.cmd")
+}
+
+/// Check if a command name refers to Mistral Vibe (case-insensitive)
+fn is_mistral_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "mistral" || lower == "mistral.cmd" || lower == "mistral.exe"
+        || lower == "vibe" || lower == "vibe.cmd"
+        || lower.ends_with("/mistral") || lower.ends_with("\\mistral")
+        || lower.ends_with("/vibe") || lower.ends_with("\\vibe")
+}
+
+/// Check if a command name refers to OpenCode (case-insensitive)
+fn is_opencode_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "opencode" || lower == "opencode.cmd" || lower == "opencode.exe"
+        || lower.ends_with("/opencode") || lower.ends_with("\\opencode")
+        || lower.ends_with("\\opencode.exe") || lower.ends_with("\\opencode.cmd")
+}
+
+/// Check if a command name refers to Qwen Code (case-insensitive)
+fn is_qwen_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower == "qwen" || lower == "qwen.cmd" || lower == "qwen.exe"
+        || lower.ends_with("/qwen") || lower.ends_with("\\qwen")
+        || lower.ends_with("\\qwen.exe") || lower.ends_with("\\qwen.cmd")
+}
+
 pub struct AgentManager {
     /// PIDs of running agent processes (for OS-level kill when needed)
     process_pids: HashMap<String, u32>,
@@ -97,6 +162,14 @@ impl AgentManager {
         // Detect agent type (case-insensitive, works with full paths too)
         let is_claude = is_claude_command(&profile.acp_command) || is_claude_command(&resolved_command);
         let is_codex = is_codex_command(&profile.acp_command) || is_codex_command(&resolved_command);
+        let is_gemini = is_gemini_command(&profile.acp_command) || is_gemini_command(&resolved_command);
+        let is_aider = is_aider_command(&profile.acp_command) || is_aider_command(&resolved_command);
+        let is_goose = is_goose_command(&profile.acp_command) || is_goose_command(&resolved_command);
+        let is_augment = is_augment_command(&profile.acp_command) || is_augment_command(&resolved_command);
+        let _is_kiro = is_kiro_command(&profile.acp_command) || is_kiro_command(&resolved_command);
+        let _is_mistral = is_mistral_command(&profile.acp_command) || is_mistral_command(&resolved_command);
+        let _is_opencode = is_opencode_command(&profile.acp_command) || is_opencode_command(&resolved_command);
+        let _is_qwen = is_qwen_command(&profile.acp_command) || is_qwen_command(&resolved_command);
 
         // Emit debug info to frontend
         self.emit_output(&agent_id, "stderr", &format!("[MultiPilot] Spawning: {}", &resolved_command));
@@ -158,37 +231,63 @@ impl AgentManager {
         }
 
         // Add output format flags for Claude Code (machine-readable streaming JSON)
-        // Check that profile.extra_args doesn't already have --output-format
+        // Claude requires -p/--print for non-interactive mode with --output-format
         let has_output_format = profile.extra_args.iter().any(|a| a == "--output-format")
             || config.extra_spawn_args.as_ref().map_or(false, |args| args.iter().any(|a| a == "--output-format"));
 
-        if is_claude && !has_output_format {
-            cmd.arg("--output-format").arg("stream-json");
-            cmd.arg("--include-partial-messages");
-            cmd.arg("--verbose");
+        let has_print_flag = profile.extra_args.iter().any(|a| a == "-p" || a == "--print")
+            || config.extra_spawn_args.as_ref().map_or(false, |args| args.iter().any(|a| a == "-p" || a == "--print"));
+
+        // Agent-specific non-interactive mode configuration
+        if is_claude {
+            if !has_print_flag {
+                // -p is REQUIRED for non-interactive mode
+                cmd.arg("-p");
+            }
+            if !has_output_format {
+                cmd.arg("--output-format").arg("stream-json");
+            }
         }
 
-        // Add JSON and quiet flags for Codex CLI (if not already specified)
-        let all_extra = profile.extra_args.iter().chain(
-            config.extra_spawn_args.as_deref().unwrap_or(&[]).iter()
-        );
-        let extra_set: Vec<&str> = all_extra.map(|s| s.as_str()).collect();
-
+        // Codex CLI - use 'exec' subcommand for non-interactive mode
         if is_codex {
-            if !extra_set.contains(&"--json") {
-                cmd.arg("--json");
-            }
-            if !extra_set.contains(&"-q") {
-                cmd.arg("-q");
-            }
+            // For non-interactive mode, use 'exec' subcommand
+            cmd.arg("exec");
         }
 
-        // Add initial prompt if provided — LAST positional-ish arg
+        // Aider - runs in non-interactive mode automatically with --no-pretty
+        if is_aider {
+            // Aider outputs clean text by default, no special flags needed for non-interactive
+            // User can add --no-pretty to extra_args if needed
+        }
+
+        // Goose - use 'run' subcommand with -t for task mode
+        if is_goose {
+            // Goose needs 'run' subcommand and -t for task
+            cmd.arg("run").arg("-t");
+        }
+
+        // Augment Code - check if it has special requirements
+        if is_augment {
+            // Augment handles non-interactive mode differently, no automatic flags
+        }
+
+        // Gemini - will handle -p flag in prompt section below
+        // Kiro, Mistral, OpenCode, Qwen - rely on profile.extra_args for now
+
+        // Add initial prompt if provided
         if let Some(ref prompt) = config.initial_prompt {
             if profile.supports_prompt_input {
-                let flag = profile.prompt_flag.as_deref().unwrap_or("-p");
-                if flag.is_empty() {
-                    // Positional prompt (e.g., Codex takes prompt as positional arg)
+                let flag = profile.prompt_flag.as_deref().unwrap_or("");
+
+                if is_gemini && !profile.extra_args.iter().any(|a| a == "-p" || a == "--prompt") {
+                    // Gemini needs -p flag for non-interactive
+                    cmd.arg("-p").arg(prompt);
+                } else if is_goose {
+                    // Goose takes prompt as positional after 'run -t'
+                    cmd.arg(prompt);
+                } else if flag.is_empty() {
+                    // Positional prompt (Codex exec takes prompt as positional)
                     cmd.arg(prompt);
                 } else {
                     cmd.arg(flag).arg(prompt);

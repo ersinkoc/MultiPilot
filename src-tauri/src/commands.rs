@@ -144,9 +144,6 @@ pub async fn restart_agent(
 pub async fn start_sidecar(
     app: tauri::AppHandle,
 ) -> Result<u32, String> {
-    use std::process::Stdio;
-    use tokio::process::Command;
-
     // Check if we're in development mode (debug build)
     let is_dev = cfg!(debug_assertions);
 
@@ -208,7 +205,7 @@ async fn start_sidecar_dev(app: tauri::AppHandle) -> Result<u32, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         format!("Failed to start sidecar: {}. Ensure Node.js deps are installed in sidecar/", e)
     })?;
 
@@ -222,7 +219,6 @@ async fn start_sidecar_dev(app: tauri::AppHandle) -> Result<u32, String> {
 async fn start_sidecar_production(app: tauri::AppHandle) -> Result<u32, String> {
     use std::process::Stdio;
     use tokio::process::Command;
-    use tauri::Emitter;
 
     // Get the bundled sidecar binary path from Tauri's resource directory
     let sidecar_path = app.path()
@@ -279,7 +275,7 @@ async fn start_sidecar_production(app: tauri::AppHandle) -> Result<u32, String> 
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         format!("Failed to start sidecar binary: {}. Path: {:?}", e, sidecar_bin)
     })?;
 

@@ -89,7 +89,7 @@ If you prefer manual setup:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/multipilot.git
+git clone https://github.com/ersinkoc/multipilot.git
 cd multipilot
 
 # Install frontend dependencies
